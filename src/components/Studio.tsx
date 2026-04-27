@@ -62,6 +62,12 @@ export default function Studio() {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Per-glyph SVG editor
+  const [editingSvgId, setEditingSvgId] = useState<string | null>(null);
+  const editingMapping = useMemo(() => mappings.find((m) => m.svgId === editingSvgId) || null, [editingSvgId, mappings]);
+  const [svgDraft, setSvgDraft] = useState("");
+  const [svgDraftEvenOdd, setSvgDraftEvenOdd] = useState(true);
+
   const hasSvgs = svgs.length > 0;
   const hasMappings = mappings.some((m) => typeof m.unicode === "number");
 
@@ -156,6 +162,7 @@ export default function Studio() {
           glyphName: defaultGlyphNameForFilename(s.file.name),
           unicode,
           transform: { scale: 1, dx: 0, dy: 0 },
+          evenOddFill: true,
         };
       });
       setMappings(nextMappings);
@@ -227,6 +234,12 @@ export default function Studio() {
       style.remove();
     };
   }, [previewUrl, previewFontFamily]);
+
+  useEffect(() => {
+    if (!editingMapping) return;
+    setSvgDraft(editingMapping.svgText || "");
+    setSvgDraftEvenOdd(editingMapping.evenOddFill ?? true);
+  }, [editingMapping]);
 
   const steps: Array<{ id: StepId; label: string; enabled: boolean }> = [
     { id: "upload", label: "Upload SVGs", enabled: true },
@@ -403,18 +416,19 @@ export default function Studio() {
                     </div>
 
                     <div className="overflow-hidden rounded-lg border border-zinc-200">
-                      <div className="grid grid-cols-[1fr_170px_170px_220px] gap-0 border-b border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-medium text-zinc-600">
+                      <div className="grid grid-cols-[1fr_170px_170px_220px_120px] gap-0 border-b border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-medium text-zinc-600">
                         <div>Filename</div>
                         <div>Glyph name</div>
                         <div>Character (Unicode)</div>
                         <div>Adjust (scale / dx / dy)</div>
+                        <div>SVG</div>
                       </div>
                       <div className="max-h-[520px] overflow-auto">
                         {mappings.map((m, idx) => {
                           const detected = detectGlyphFromFilename(m.filename);
                           const suggestion = detected.kind === "unicode" ? `${detected.char} (U+${detected.codepoint.toString(16).toUpperCase().padStart(4, "0")})` : detected.label;
                           return (
-                            <div key={m.svgId} className={cx("grid grid-cols-[1fr_170px_170px_220px] gap-0 px-3 py-2", idx % 2 ? "bg-white" : "bg-zinc-50/30")}>
+                            <div key={m.svgId} className={cx("grid grid-cols-[1fr_170px_170px_220px_120px] gap-0 px-3 py-2", idx % 2 ? "bg-white" : "bg-zinc-50/30")}>
                               <div className="pr-3">
                                 <div className="truncate text-sm">{m.filename}</div>
                                 <div className="truncate text-xs text-zinc-500">Detected: {suggestion}</div>
@@ -505,6 +519,14 @@ export default function Studio() {
                                   />
                                   <div className="text-[11px] text-zinc-500">dy</div>
                                 </div>
+                              </div>
+                              <div className="flex items-center justify-end">
+                                <button
+                                  className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-sm hover:bg-zinc-100"
+                                  onClick={() => setEditingSvgId(m.svgId)}
+                                >
+                                  Edit
+                                </button>
                               </div>
                             </div>
                           );
@@ -678,6 +700,88 @@ export default function Studio() {
           Built as a studio-first workflow: deterministic filename detection + manual mapping, with future room for AI helpers.
         </footer>
       </div>
+
+      {editingMapping ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+              <div>
+                <div className="text-sm font-semibold">SVG editor</div>
+                <div className="text-xs text-zinc-600">{editingMapping.filename}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm hover:bg-zinc-100"
+                  onClick={() => setEditingSvgId(null)}
+                >
+                  Close
+                </button>
+                <button
+                  className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800"
+                  onClick={() => {
+                    setMappings((old) =>
+                      old.map((x) =>
+                        x.svgId === editingMapping.svgId ? { ...x, svgText: svgDraft, evenOddFill: svgDraftEvenOdd } : x
+                      )
+                    );
+                    setEditingSvgId(null);
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-0 md:grid-cols-2">
+              <div className="border-b border-zinc-200 p-4 md:border-b-0 md:border-r">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="text-xs font-medium text-zinc-600">SVG source</div>
+                  <label className="flex items-center gap-2 text-xs text-zinc-700">
+                    <input type="checkbox" checked={svgDraftEvenOdd} onChange={(e) => setSvgDraftEvenOdd(e.target.checked)} />
+                    Even-odd fill (treat empty space as holes)
+                  </label>
+                </div>
+                <textarea
+                  className="h-[420px] w-full rounded-lg border border-zinc-200 p-3 font-mono text-xs"
+                  value={svgDraft}
+                  onChange={(e) => setSvgDraft(e.target.value)}
+                />
+                <div className="mt-2 text-xs text-zinc-600">
+                  Tip: This editor is meant for quick fixes (viewBox, transforms, path cleanup). The build will use this exact SVG text.
+                </div>
+              </div>
+
+              <div className="p-4">
+                <div className="mb-2 text-xs font-medium text-zinc-600">Live preview</div>
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                  <div
+                    className="mx-auto h-[420px] w-full max-w-[520px] overflow-hidden rounded-lg bg-white"
+                    style={{
+                      backgroundImage:
+                        "linear-gradient(45deg, #f4f4f5 25%, transparent 25%), linear-gradient(-45deg, #f4f4f5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f4f4f5 75%), linear-gradient(-45deg, transparent 75%, #f4f4f5 75%)",
+                      backgroundSize: "24px 24px",
+                      backgroundPosition: "0 0, 0 12px, 12px -12px, -12px 0px",
+                    }}
+                  >
+                    <div
+                      className="h-full w-full p-6"
+                      // This is local user content (their SVG). We keep it scoped to preview only.
+                      dangerouslySetInnerHTML={{
+                        __html: svgDraftEvenOdd
+                          ? svgDraft.replace(/<svg\b([^>]*)>/i, '<svg$1><g fill-rule="evenodd" clip-rule="evenodd">').replace(/<\/svg>/i, "</g></svg>")
+                          : svgDraft,
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="mt-2 text-xs text-zinc-600">
+                  If holes look “filled in”, keep Even-odd enabled and ensure overlapping shapes are filled (not `fill=&quot;none&quot;`).
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
